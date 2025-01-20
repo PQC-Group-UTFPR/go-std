@@ -13,14 +13,16 @@ prompt_installation() {
   fi
 }
 
-# Ask if the user is using Ubuntu or Arch Linux
-read -p "Are you using Ubuntu or Arch Linux? (ubuntu/arch): " OS_CHOICE
-if [[ "$OS_CHOICE" =~ ^[Uu]buntu$ ]]; then
+# Check the Linux distribution and install missing dependencies
+LSB=$(cat /etc/lsb-release 2>/dev/null)
+if [[ "${LSB}" =~ [Uu]buntu ]]; then
   INSTALL_CMD="sudo apt install astyle cmake gcc ninja-build libssl-dev python3-pytest python3-pytest-xdist unzip xsltproc doxygen graphviz python3-yaml git pkg-config || exit 1"
-elif [[ "$OS_CHOICE" =~ ^[Aa]rch$ ]]; then
+elif [[ "${LSB}" =~ [Aa]rch ]]; then
   INSTALL_CMD="sudo pacman -S --needed astyle cmake gcc ninja openssl lib32-openssl python-pytest python-pytest-xdist unzip libxslt doxygen graphviz python-yaml git pkgconf || exit 1"
+elif [[ "${LSB}" =~ [Gg]entoo ]]; then
+  INSTALL_CMD="sudo emerge --selective --ask dev-util/astyle dev-build/cmake sys-devel/gcc dev-build/ninja dev-libs/openssl dev-python/pytest app-arch/unzip dev-libs/libxslt app-text/doxygen dev-python/graphviz dev-python/pyyaml dev-vcs/git dev-util/pkgconf || exit 1"
 else
-  echo "Unsupported OS choice. Exiting."
+  echo "Unsupported OS. Exiting."
   exit 1
 fi
 
