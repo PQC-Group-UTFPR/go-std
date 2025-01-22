@@ -1,7 +1,9 @@
 package testing
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"testing"
@@ -11,20 +13,24 @@ import (
 	"github.com/open-quantum-safe/liboqs-go/oqs"
 )
 
+
 var algorithms = []string{
 	"ML-DSA-44",
 	"ML-DSA-65",
 	"ML-DSA-87",
-	"cross-rsdp-128-small",
-	"cross-rsdp-128-fast",
-	"cross-rsdp-192-small",
-	"cross-rsdp-256-small",
+	"cross-rsdpg-128-small",
+	"cross-rsdpg-128-fast",
+	"cross-rsdpg-192-small",
+	"cross-rsdpg-256-small",
+	"MAYO-1",
+	"MAYO-2",
+	"MAYO-3",
+	"MAYO-5", //conforme Professor e Boutrik
 }
 
 var duration time.Duration
 
 func init() {
-	// Define the duration flag and set its default value
 	flag.DurationVar(&duration, "duration", 3*time.Second, "duration for each test")
 }
 
@@ -34,7 +40,16 @@ func TestMain(m *testing.M) {
 	m.Run()
 }
 
-var hash = sha256.Sum256([]byte("Test message for post-quantum signature"))
+        
+func generateRandomHash() []byte {
+	randomBytes := make([]byte, 32)
+	_, err := rand.Read(randomBytes)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to generate random hash: %v", err))
+	}
+	hash := sha256.Sum256(randomBytes)
+	return hash[:]
+}// Função para gerar hash aleatório
 
 func TestKeygenPQC(t *testing.T) {
 	for _, alg := range algorithms {
@@ -96,6 +111,7 @@ func TestSignPQC(t *testing.T) {
 				t.Fatalf("Failed to generate keys for %s: %v", alg, err)
 			}
 
+			hash := generateRandomHash()
 			tsc := gotsc.TSCOverhead()
 
 			start := time.Now()
@@ -105,7 +121,7 @@ func TestSignPQC(t *testing.T) {
 
 			iterations := 0
 			for time.Since(start) < duration {
-				_, err := signer.Sign(hash[:])
+				_, err := signer.Sign(hash)
 				if err != nil {
 					t.Fatalf("Failed to sign message for %s: %v", alg, err)
 				}
@@ -147,7 +163,8 @@ func TestVerifyPQC(t *testing.T) {
 				t.Fatalf("Failed to generate keys for %s: %v", alg, err)
 			}
 
-			signature, err := signer.Sign(hash[:])
+			hash := generateRandomHash()
+			signature, err := signer.Sign(hash)
 			if err != nil {
 				t.Fatalf("Failed to sign message for %s: %v", alg, err)
 			}
@@ -161,7 +178,7 @@ func TestVerifyPQC(t *testing.T) {
 
 			iterations := 0
 			for time.Since(start) < duration {
-				valid, err := signer.Verify(hash[:], signature, publicKey)
+				valid, err := signer.Verify(hash, signature, publicKey)
 				if err != nil || !valid {
 					t.Fatalf("Failed to verify signature for %s", alg)
 				}
