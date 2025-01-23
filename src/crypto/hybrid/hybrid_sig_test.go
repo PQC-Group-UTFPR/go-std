@@ -11,19 +11,30 @@ import (
   "github.com/dterei/gotsc"
 )
 
-var algorithms = []OID{
-	MAYO1_ED25519,
-	MAYO2_ED25519,
-	MAYO3_ED25519,
-	MAYO5_ED25519,
-	CROSS_128_SMALL_ED25519,
-	CROSS_128_FAST_ED25519,
-	CROSS_192_SMALL_ED25519,
-	CROSS_256_SMALL_ED25519,
-  ML_DSA_44_P256,
-  ML_DSA_65_P384,
-  ML_DSA_87_P521,
-	ML_DSA_65_ED25519,
+type algorithm struct{
+    SigOID OID
+    Name string
+}
+
+var algorithms = []algorithm{
+	{ MAYO1_P256, "MAYO1_P256" },
+	{ MAYO2_P256, "MAYO2_P256" },
+	{ MAYO3_P384, "MAYO3_P384" },
+	{ MAYO5_P521, "MAYO5_P521" },
+	{ MAYO1_ED25519, "MAYO1_ED25519" },
+	{ MAYO2_ED25519, "MAYO2_ED25519" },
+	{ MAYO3_ED25519, "MAYO3_ED25519" },
+	{ CROSS_128_SMALL_P256, "CROSS_128_SMALL_P256" },
+	{ CROSS_128_FAST_P256, "CROSS_128_SMALL_P256" },
+	{ CROSS_192_SMALL_P384, "CROSS_128_SMALL_P384" },
+	{ CROSS_256_SMALL_P521, "CROSS_256_SMALL_P521" },
+	{ CROSS_128_SMALL_ED25519, "CROSS_128_SMALL_ED25519" },
+	{ CROSS_128_FAST_ED25519, "CROSS_128_FAST_ED25519" },
+	{ CROSS_192_SMALL_ED25519, "CROSS_192_SMALL_ED25519" },
+    { ML_DSA_44_P256, "ML_DSA_44_P256" },
+    { ML_DSA_65_P384, "ML_DSA_65_P384" },
+    { ML_DSA_87_P521, "ML_DSA_87_P521" },
+	{ ML_DSA_65_ED25519, "ML_DSA_65_ED25519" },
 }
 
 var (
@@ -46,7 +57,7 @@ var hash = sha256.Sum256([]byte("Test message for hybrid signature"))
 
 func TestKeygenHybrid(t *testing.T) {
 	for _, alg := range algorithms {
-		t.Run(string(alg), func(t *testing.T) {
+		t.Run(string(alg.Name), func(t *testing.T) {
 			tsc := gotsc.TSCOverhead()
 
 			start := time.Now()
@@ -57,9 +68,9 @@ func TestKeygenHybrid(t *testing.T) {
 			iterations := 0
 			for time.Since(start) < duration {
 				// Test key generation
-				_, err := GenerateKey(alg)
+				_, err := GenerateKey(alg.SigOID)
 				if err != nil {
-					t.Fatalf("Failed to generate keys for %s: %v", alg, err)
+					t.Fatalf("Failed to generate keys for %s: %v", alg.Name, err)
 				}
 
 				keyGenTime = append(keyGenTime, time.Since(start).Microseconds())
@@ -81,18 +92,18 @@ func TestKeygenHybrid(t *testing.T) {
 			meanTime := mean(keyGenTime)
 
 			// Print results
-      fmt.Printf("TESTING KEYGEN - Algorithm: %s | Iterations: %d | Mean CPU Cycles: %d | Mean Time: %d µs | Operations/S: %f s\n", alg, iterations, meanCPU, meanTime, opsPerS)
+      fmt.Printf("TESTING KEYGEN - Algorithm: %s | Iterations: %d | Mean CPU Cycles: %d | Mean Time: %d µs | Operations/S: %f s\n", alg.Name, iterations, meanCPU, meanTime, opsPerS)
 		})
 	}
 }
 
 func TestSignHybrid(t *testing.T) {
 	for _, alg := range algorithms {
-		t.Run(string(alg), func(t *testing.T) {
+		t.Run(string(alg.Name), func(t *testing.T) {
 
-      privKey, err := GenerateKey(alg)
+      privKey, err := GenerateKey(alg.SigOID)
       if err != nil {
-        t.Fatalf("Failed to generate keys for %s: %v", alg, err)
+        t.Fatalf("Failed to generate keys for %s: %v", alg.Name, err)
       }
 
 			tsc := gotsc.TSCOverhead()
@@ -108,7 +119,7 @@ func TestSignHybrid(t *testing.T) {
 				// Test signing
 				_, err = privKey.Sign(hash[:])
 				if err != nil {
-					t.Fatalf("Failed to sign message for %s: %v", alg, err)
+					t.Fatalf("Failed to sign message for %s: %v", alg.Name, err)
 				}
 
 				signTime = append(signTime, time.Since(start).Microseconds())
@@ -130,23 +141,23 @@ func TestSignHybrid(t *testing.T) {
 			meanTime := mean(signTime)
 
 			// Print results
-			fmt.Printf("TESTING SIGN - Algorithm: %s | Iterations: %d | Mean CPU Cycles: %d | Mean Time: %d µs | Operations/S: %f s\n", alg, iterations, meanCPU, meanTime, opsPerS)
+			fmt.Printf("TESTING SIGN - Algorithm: %s | Iterations: %d | Mean CPU Cycles: %d | Mean Time: %d µs | Operations/S: %f s\n", alg.Name, iterations, meanCPU, meanTime, opsPerS)
 		})
 	}
 }
 
 func TestVerifyHybrid(t *testing.T) {
 	for _, alg := range algorithms {
-		t.Run(string(alg), func(t *testing.T) {
-      privKey, err := GenerateKey(alg)
+		t.Run(string(alg.Name), func(t *testing.T) {
+      privKey, err := GenerateKey(alg.SigOID)
       if err != nil {
-        t.Fatalf("Failed to generate keys for %s: %v", alg, err)
+        t.Fatalf("Failed to generate keys for %s: %v", alg.Name, err)
       }
       pubKey := privKey.ExportPublicKey()
 
       signature, err := privKey.Sign(hash[:])
       if err != nil {
-        t.Fatalf("Failed to sign message for %s: %v", alg, err)
+        t.Fatalf("Failed to sign message for %s: %v", alg.Name, err)
       }
 
 			tsc := gotsc.TSCOverhead()
@@ -160,7 +171,7 @@ func TestVerifyHybrid(t *testing.T) {
 			for time.Since(start) < duration {
 				// Test verification
 				if !VerifyHybrid(pubKey, hash[:], signature) {
-					t.Errorf("Signature verification failed for %s", alg)
+					t.Errorf("Signature verification failed for %s", alg.Name)
 				}
 
 				verifyTime = append(verifyTime, time.Since(start).Microseconds())
@@ -182,7 +193,7 @@ func TestVerifyHybrid(t *testing.T) {
 			meanTime := mean(verifyTime)
 
 			// Print results
-			fmt.Printf("TESTING VERIFY - Algorithm: %s | Iterations: %d | Mean CPU Cycles: %d | Mean Time: %d µs | Operations/S: %f s\n", alg, iterations, meanCPU, meanTime, opsPerS)
+			fmt.Printf("TESTING VERIFY - Algorithm: %s | Iterations: %d | Mean CPU Cycles: %d | Mean Time: %d µs | Operations/S: %f s\n", alg.Name, iterations, meanCPU, meanTime, opsPerS)
 		})
 	}
 }
