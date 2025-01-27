@@ -27,7 +27,7 @@ var algorithms = []string{
 }
 
 var duration time.Duration
-var globalHash []byte
+var hash []byte
 
 func init() {
 	// Define the duration flag and set its default value
@@ -39,7 +39,7 @@ func TestMain(m *testing.M) {
 	fmt.Printf("Duration set to: %v\n", duration)
 
 	// Gera o hash aleatório de forma global
-	globalHash = generateRandomHash()
+	hash = generateRandomHash()
 	m.Run()
 }
 
@@ -48,7 +48,7 @@ func generateRandomHash() []byte {
 	randomBytes := make([]byte, 50)
 	_, err := rand.Read(randomBytes)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to generate random hash: %v", err))
+        t.Fatalf("Failed to generate random hash: %v", err)
 	}
 	hash := sha256.Sum256(randomBytes)
 	return hash[:]
@@ -123,7 +123,7 @@ func TestSignPQC(t *testing.T) {
 
 			iterations := 0
 			for time.Since(start) < duration {
-				_, err := signer.Sign(globalHash)
+				_, err := signer.Sign(hash)
 				if err != nil {
 					t.Fatalf("Failed to sign message for %s: %v", alg, err)
 				}
@@ -165,7 +165,7 @@ func TestVerifyPQC(t *testing.T) {
 				t.Fatalf("Failed to generate keys for %s: %v", alg, err)
 			}
 
-			signature, err := signer.Sign(globalHash)
+			signature, err := signer.Sign(hash)
 			if err != nil {
 				t.Fatalf("Failed to sign message for %s: %v", alg, err)
 			}
@@ -179,7 +179,7 @@ func TestVerifyPQC(t *testing.T) {
 
 			iterations := 0
 			for time.Since(start) < duration {
-				valid, err := signer.Verify(globalHash, signature, publicKey)
+				valid, err := signer.Verify(hash, signature, publicKey)
 				if err != nil || !valid {
 					t.Fatalf("Failed to verify signature for %s", alg)
 				}
