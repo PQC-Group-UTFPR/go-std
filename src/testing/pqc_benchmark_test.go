@@ -48,6 +48,7 @@ func generateRandomHash() []byte {
 	randomBytes := make([]byte, 50)
 	_, err := rand.Read(randomBytes)
 	if err != nil {
+        var t *testing.T
         t.Fatalf("Failed to generate random hash: %v", err)
 	}
 	hash := sha256.Sum256(randomBytes)
