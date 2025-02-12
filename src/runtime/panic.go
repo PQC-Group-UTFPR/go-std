@@ -649,6 +649,13 @@ func preprintpanics(p *_panic) {
 		}
 	}()
 	for p != nil {
+		if p.link != nil && *efaceOf(&p.link.arg) == *efaceOf(&p.arg) {
+			// This panic contains the same value as the next one in the chain.
+			// Mark it as reraised. We will skip printing it twice in a row.
+			p.link.reraised = true
+			p = p.link
+			continue
+		}
 		switch v := p.arg.(type) {
 		case error:
 			p.arg = v.Error()
@@ -664,6 +671,9 @@ func preprintpanics(p *_panic) {
 func printpanics(p *_panic) {
 	if p.link != nil {
 		printpanics(p.link)
+		if p.link.reraised {
+			return
+		}
 		if !p.link.goexit {
 			print("\t")
 		}
@@ -673,7 +683,9 @@ func printpanics(p *_panic) {
 	}
 	print("panic: ")
 	printpanicval(p.arg)
-	if p.recovered {
+	if p.reraised {
+		print(" [recovered, reraised]")
+	} else if p.recovered {
 		print(" [recovered]")
 	}
 	print("\n")
@@ -1038,13 +1050,35 @@ func rand_fatal(s string) {
 	fatal(s)
 }
 
+//go:linkname sysrand_fatal crypto/internal/sysrand.fatal
+func sysrand_fatal(s string) {
+	fatal(s)
+}
+
+//go:linkname fips_fatal crypto/internal/fips140.fatal
+func fips_fatal(s string) {
+	fatal(s)
+}
+
+//go:linkname maps_fatal internal/runtime/maps.fatal
+func maps_fatal(s string) {
+	fatal(s)
+}
+
+//go:linkname internal_sync_throw internal/sync.throw
+func internal_sync_throw(s string) {
+	throw(s)
+}
+
+//go:linkname internal_sync_fatal internal/sync.fatal
+func internal_sync_fatal(s string) {
+	fatal(s)
+}
+
 // throw triggers a fatal error that dumps a stack trace and exits.
 //
 // throw should be used for runtime-internal fatal errors where Go itself,
 // rather than user code, may be at fault for the failure.
-//
-// NOTE: temporarily marked "go:noinline" pending investigation/fix of
-// issue #67274, so as to fix longtest builders.
 //
 // throw should be an internal detail,
 // but widely used packages access it using linkname.
@@ -1130,7 +1164,7 @@ func recovery(gp *g) {
 		// frames that we've already processed.
 		//
 		// There's a similar issue with nested panics, when the inner
-		// panic supercedes the outer panic. Again, we end up needing to
+		// panic supersedes the outer panic. Again, we end up needing to
 		// walk the same stack frames.
 		//
 		// These are probably pretty rare occurrences in practice, and

@@ -582,6 +582,20 @@ func walkCall(n *ir.CallExpr, init *ir.Nodes) ir.Node {
 		return walkExpr(n, init)
 	}
 
+	if n.Op() == ir.OCALLFUNC {
+		fn := ir.StaticCalleeName(n.Fun)
+		if fn != nil && fn.Sym().Pkg.Path == "hash/maphash" && strings.HasPrefix(fn.Sym().Name, "escapeForHash[") {
+			// hash/maphash.escapeForHash[T] is a compiler intrinsic
+			// for the escape analysis to escape its argument based on
+			// the type. The call itself is no-op. Just walk the
+			// argument.
+			ps := fn.Type().Params()
+			if len(ps) == 2 && ps[1].Type.IsShape() {
+				return walkExpr(n.Args[1], init)
+			}
+		}
+	}
+
 	if name, ok := n.Fun.(*ir.Name); ok {
 		sym := name.Sym()
 		if sym.Pkg.Path == "go.runtime" && sym.Name == "deferrangefunc" {
@@ -1062,10 +1076,10 @@ func usemethod(n *ir.CallExpr) {
 
 	if ir.IsConst(targetName, constant.String) {
 		name := constant.StringVal(targetName.Val())
-
-		r := obj.Addrel(ir.CurFunc.LSym)
-		r.Type = objabi.R_USENAMEDMETHOD
-		r.Sym = staticdata.StringSymNoCommon(name)
+		ir.CurFunc.LSym.AddRel(base.Ctxt, obj.Reloc{
+			Type: objabi.R_USENAMEDMETHOD,
+			Sym:  staticdata.StringSymNoCommon(name),
+		})
 	} else {
 		ir.CurFunc.LSym.Set(obj.AttrReflectMethod, true)
 	}

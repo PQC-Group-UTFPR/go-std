@@ -48,6 +48,8 @@ const (
 	O_CLOEXEC      = 0x80000
 	o_DIRECTORY    = 0x100000   // used by internal/syscall/windows
 	o_NOFOLLOW_ANY = 0x20000000 // used by internal/syscall/windows
+	o_OPEN_REPARSE = 0x40000000 // used by internal/syscall/windows
+	o_WRITE_ATTRS  = 0x80000000 // used by internal/syscall/windows
 )
 
 const (
@@ -93,6 +95,7 @@ const (
 
 	FILE_LIST_DIRECTORY   = 0x00000001
 	FILE_APPEND_DATA      = 0x00000004
+	_FILE_WRITE_EA        = 0x00000010
 	FILE_WRITE_ATTRIBUTES = 0x00000100
 
 	FILE_SHARE_READ              = 0x00000001

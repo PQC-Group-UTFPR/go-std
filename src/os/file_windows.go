@@ -223,17 +223,13 @@ func Pipe() (r *File, w *File, err error) {
 	return newFile(p[0], "|0", "pipe"), newFile(p[1], "|1", "pipe"), nil
 }
 
-var (
-	useGetTempPath2Once sync.Once
-	useGetTempPath2     bool
-)
+var useGetTempPath2 = sync.OnceValue(func() bool {
+	return windows.ErrorLoadingGetTempPath2() == nil
+})
 
 func tempDir() string {
-	useGetTempPath2Once.Do(func() {
-		useGetTempPath2 = (windows.ErrorLoadingGetTempPath2() == nil)
-	})
 	getTempPath := syscall.GetTempPath
-	if useGetTempPath2 {
+	if useGetTempPath2() {
 		getTempPath = windows.GetTempPath2
 	}
 	n := uint32(syscall.MAX_PATH)
@@ -419,10 +415,13 @@ func readReparseLink(path string) (string, error) {
 		return "", err
 	}
 	defer syscall.CloseHandle(h)
+	return readReparseLinkHandle(h)
+}
 
+func readReparseLinkHandle(h syscall.Handle) (string, error) {
 	rdbbuf := make([]byte, syscall.MAXIMUM_REPARSE_DATA_BUFFER_SIZE)
 	var bytesReturned uint32
-	err = syscall.DeviceIoControl(h, syscall.FSCTL_GET_REPARSE_POINT, nil, 0, &rdbbuf[0], uint32(len(rdbbuf)), &bytesReturned, nil)
+	err := syscall.DeviceIoControl(h, syscall.FSCTL_GET_REPARSE_POINT, nil, 0, &rdbbuf[0], uint32(len(rdbbuf)), &bytesReturned, nil)
 	if err != nil {
 		return "", err
 	}

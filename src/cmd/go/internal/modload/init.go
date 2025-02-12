@@ -23,6 +23,7 @@ import (
 
 	"cmd/go/internal/base"
 	"cmd/go/internal/cfg"
+	"cmd/go/internal/fips140"
 	"cmd/go/internal/fsys"
 	"cmd/go/internal/gover"
 	"cmd/go/internal/lockedfile"
@@ -355,7 +356,8 @@ func BinDir() string {
 // for example 'go mod tidy', that don't operate in workspace mode.
 func InitWorkfile() {
 	// Initialize fsys early because we need overlay to read go.work file.
-	if err := fsys.Init(base.Cwd()); err != nil {
+	fips140.Init()
+	if err := fsys.Init(); err != nil {
 		base.Fatal(err)
 	}
 	workFilePath = FindGoWork(base.Cwd())
@@ -414,6 +416,8 @@ func Init() {
 	}
 	initialized = true
 
+	fips140.Init()
+
 	// Keep in sync with WillBeEnabled. We perform extra validation here, and
 	// there are lots of diagnostics and side effects, so we can't use
 	// WillBeEnabled directly.
@@ -434,7 +438,7 @@ func Init() {
 		return
 	}
 
-	if err := fsys.Init(base.Cwd()); err != nil {
+	if err := fsys.Init(); err != nil {
 		base.Fatal(err)
 	}
 
@@ -446,23 +450,6 @@ func Init() {
 	// See golang.org/issue/9341 and golang.org/issue/12706.
 	if os.Getenv("GIT_TERMINAL_PROMPT") == "" {
 		os.Setenv("GIT_TERMINAL_PROMPT", "0")
-	}
-
-	// Disable any ssh connection pooling by Git.
-	// If a Git subprocess forks a child into the background to cache a new connection,
-	// that child keeps stdout/stderr open. After the Git subprocess exits,
-	// os/exec expects to be able to read from the stdout/stderr pipe
-	// until EOF to get all the data that the Git subprocess wrote before exiting.
-	// The EOF doesn't come until the child exits too, because the child
-	// is holding the write end of the pipe.
-	// This is unfortunate, but it has come up at least twice
-	// (see golang.org/issue/13453 and golang.org/issue/16104)
-	// and confuses users when it does.
-	// If the user has explicitly set GIT_SSH or GIT_SSH_COMMAND,
-	// assume they know what they are doing and don't step on it.
-	// But default to turning off ControlMaster.
-	if os.Getenv("GIT_SSH") == "" && os.Getenv("GIT_SSH_COMMAND") == "" {
-		os.Setenv("GIT_SSH_COMMAND", "ssh -o ControlMaster=no -o BatchMode=yes")
 	}
 
 	if os.Getenv("GCM_INTERACTIVE") == "" {
@@ -940,7 +927,7 @@ func loadModFile(ctx context.Context, opts *PackageOpts) (*Requirements, error) 
 					err = errWorkTooOld(gomod, workFile, tooNew.GoVersion)
 				} else {
 					err = fmt.Errorf("cannot load module %s listed in go.work file: %w",
-						base.ShortPath(filepath.Dir(gomod)), err)
+						base.ShortPath(filepath.Dir(gomod)), base.ShortPathError(err))
 				}
 			}
 			errs = append(errs, err)
@@ -1938,7 +1925,7 @@ func commitRequirements(ctx context.Context, opts WriteOpts) (err error) {
 
 	mainModule := MainModules.mustGetSingleMainModule()
 	modFilePath := modFilePath(MainModules.ModRoot(mainModule))
-	if _, ok := fsys.OverlayPath(modFilePath); ok {
+	if fsys.Replaced(modFilePath) {
 		if dirty {
 			return errors.New("updates to go.mod needed, but go.mod is part of the overlay specified with -overlay")
 		}

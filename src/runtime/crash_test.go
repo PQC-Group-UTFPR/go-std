@@ -32,8 +32,11 @@ const entrypointVar = "RUNTIME_TEST_ENTRYPOINT"
 
 func TestMain(m *testing.M) {
 	switch entrypoint := os.Getenv(entrypointVar); entrypoint {
-	case "crash":
-		crash()
+	case "panic":
+		crashViaPanic()
+		panic("unreachable")
+	case "trap":
+		crashViaTrap()
 		panic("unreachable")
 	default:
 		log.Fatalf("invalid %s: %q", entrypointVar, entrypoint)
@@ -353,6 +356,37 @@ panic: third panic
 
 }
 
+func TestReraisedPanic(t *testing.T) {
+	output := runTestProg(t, "testprog", "ReraisedPanic")
+	want := `panic: message [recovered, reraised]
+`
+	if !strings.HasPrefix(output, want) {
+		t.Fatalf("output does not start with %q:\n%s", want, output)
+	}
+}
+
+func TestReraisedMiddlePanic(t *testing.T) {
+	output := runTestProg(t, "testprog", "ReraisedMiddlePanic")
+	want := `panic: inner [recovered]
+	panic: middle [recovered, reraised]
+	panic: outer
+`
+	if !strings.HasPrefix(output, want) {
+		t.Fatalf("output does not start with %q:\n%s", want, output)
+	}
+}
+
+func TestReraisedPanicSandwich(t *testing.T) {
+	output := runTestProg(t, "testprog", "ReraisedPanicSandwich")
+	want := `panic: outer [recovered]
+	panic: inner [recovered]
+	panic: outer
+`
+	if !strings.HasPrefix(output, want) {
+		t.Fatalf("output does not start with %q:\n%s", want, output)
+	}
+}
+
 func TestGoexitCrash(t *testing.T) {
 	// External linking brings in cgo, causing deadlock detection not working.
 	testenv.MustInternalLink(t, false)
@@ -622,7 +656,10 @@ func TestConcurrentMapWrites(t *testing.T) {
 	testenv.MustHaveGoRun(t)
 	output := runTestProg(t, "testprog", "concurrentMapWrites")
 	want := "fatal error: concurrent map writes\n"
-	if !strings.HasPrefix(output, want) {
+	// Concurrent writes can corrupt the map in a way that we
+	// detect with a separate throw.
+	want2 := "fatal error: small map with no empty slot (concurrent map writes?)\n"
+	if !strings.HasPrefix(output, want) && !strings.HasPrefix(output, want2) {
 		t.Fatalf("output does not start with %q:\n%s", want, output)
 	}
 }
@@ -633,7 +670,10 @@ func TestConcurrentMapReadWrite(t *testing.T) {
 	testenv.MustHaveGoRun(t)
 	output := runTestProg(t, "testprog", "concurrentMapReadWrite")
 	want := "fatal error: concurrent map read and map write\n"
-	if !strings.HasPrefix(output, want) {
+	// Concurrent writes can corrupt the map in a way that we
+	// detect with a separate throw.
+	want2 := "fatal error: small map with no empty slot (concurrent map writes?)\n"
+	if !strings.HasPrefix(output, want) && !strings.HasPrefix(output, want2) {
 		t.Fatalf("output does not start with %q:\n%s", want, output)
 	}
 }
@@ -644,7 +684,10 @@ func TestConcurrentMapIterateWrite(t *testing.T) {
 	testenv.MustHaveGoRun(t)
 	output := runTestProg(t, "testprog", "concurrentMapIterateWrite")
 	want := "fatal error: concurrent map iteration and map write\n"
-	if !strings.HasPrefix(output, want) {
+	// Concurrent writes can corrupt the map in a way that we
+	// detect with a separate throw.
+	want2 := "fatal error: small map with no empty slot (concurrent map writes?)\n"
+	if !strings.HasPrefix(output, want) && !strings.HasPrefix(output, want2) {
 		t.Fatalf("output does not start with %q:\n%s", want, output)
 	}
 }
@@ -667,7 +710,10 @@ func TestConcurrentMapWritesIssue69447(t *testing.T) {
 			continue
 		}
 		want := "fatal error: concurrent map writes\n"
-		if !strings.HasPrefix(output, want) {
+		// Concurrent writes can corrupt the map in a way that we
+		// detect with a separate throw.
+		want2 := "fatal error: small map with no empty slot (concurrent map writes?)\n"
+		if !strings.HasPrefix(output, want) && !strings.HasPrefix(output, want2) {
 			t.Fatalf("output does not start with %q:\n%s", want, output)
 		}
 	}
@@ -944,7 +990,8 @@ func TestCrashWhileTracing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("could not create trace.NewReader: %v", err)
 	}
-	var seen, seenSync bool
+	var seen bool
+	nSync := 0
 	i := 1
 loop:
 	for ; ; i++ {
@@ -959,7 +1006,7 @@ loop:
 		}
 		switch ev.Kind() {
 		case traceparse.EventSync:
-			seenSync = true
+			nSync = ev.Sync().N
 		case traceparse.EventLog:
 			v := ev.Log()
 			if v.Category == "xyzzy-cat" && v.Message == "xyzzy-msg" {
@@ -973,7 +1020,7 @@ loop:
 	if err := cmd.Wait(); err == nil {
 		t.Error("the process should have panicked")
 	}
-	if !seenSync {
+	if nSync <= 1 {
 		t.Errorf("expected at least one full generation to have been emitted before the trace was considered broken")
 	}
 	if !seen {

@@ -6,6 +6,7 @@ package windows
 
 import (
 	"syscall"
+	"unsafe"
 )
 
 // Openat flags not supported by syscall.Open.
@@ -18,9 +19,11 @@ import (
 const (
 	O_DIRECTORY    = 0x100000   // target must be a directory
 	O_NOFOLLOW_ANY = 0x20000000 // disallow symlinks anywhere in the path
+	O_OPEN_REPARSE = 0x40000000 // FILE_OPEN_REPARSE_POINT, used by Lstat
+	O_WRITE_ATTRS  = 0x80000000 // FILE_WRITE_ATTRIBUTES, used by Chmod
 )
 
-func Openat(dirfd syscall.Handle, name string, flag int, perm uint32) (_ syscall.Handle, e1 error) {
+func Openat(dirfd syscall.Handle, name string, flag uint64, perm uint32) (_ syscall.Handle, e1 error) {
 	if len(name) == 0 {
 		return syscall.InvalidHandle, syscall.ERROR_FILE_NOT_FOUND
 	}
@@ -36,13 +39,21 @@ func Openat(dirfd syscall.Handle, name string, flag int, perm uint32) (_ syscall
 	case syscall.O_RDWR:
 		access = FILE_GENERIC_READ | FILE_GENERIC_WRITE
 		options |= FILE_NON_DIRECTORY_FILE
+	default:
+		// Stat opens files without requesting read or write permissions,
+		// but we still need to request SYNCHRONIZE.
+		access = SYNCHRONIZE
 	}
 	if flag&syscall.O_CREAT != 0 {
 		access |= FILE_GENERIC_WRITE
 	}
 	if flag&syscall.O_APPEND != 0 {
-		access &^= FILE_WRITE_DATA
 		access |= FILE_APPEND_DATA
+		// Remove FILE_WRITE_DATA access unless O_TRUNC is set,
+		// in which case we need it to truncate the file.
+		if flag&syscall.O_TRUNC == 0 {
+			access &^= FILE_WRITE_DATA
+		}
 	}
 	if flag&O_DIRECTORY != 0 {
 		options |= FILE_DIRECTORY_FILE
@@ -50,6 +61,9 @@ func Openat(dirfd syscall.Handle, name string, flag int, perm uint32) (_ syscall
 	}
 	if flag&syscall.O_SYNC != 0 {
 		options |= FILE_WRITE_THROUGH
+	}
+	if flag&O_WRITE_ATTRS != 0 {
+		access |= FILE_WRITE_ATTRIBUTES
 	}
 	// Allow File.Stat.
 	access |= STANDARD_RIGHTS_READ | FILE_READ_ATTRIBUTES | FILE_READ_EA
@@ -63,6 +77,10 @@ func Openat(dirfd syscall.Handle, name string, flag int, perm uint32) (_ syscall
 	}
 	if err := objAttrs.init(dirfd, name); err != nil {
 		return syscall.InvalidHandle, err
+	}
+
+	if flag&O_OPEN_REPARSE != 0 {
+		options |= FILE_OPEN_REPARSE_POINT
 	}
 
 	// We don't use FILE_OVERWRITE/FILE_OVERWRITE_IF, because when opening
@@ -95,7 +113,7 @@ func Openat(dirfd syscall.Handle, name string, flag int, perm uint32) (_ syscall
 		fileAttrs,
 		FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE,
 		disposition,
-		FILE_SYNCHRONOUS_IO_NONALERT|options,
+		FILE_SYNCHRONOUS_IO_NONALERT|FILE_OPEN_FOR_BACKUP_INTENT|options,
 		0,
 		0,
 	)
@@ -115,7 +133,7 @@ func Openat(dirfd syscall.Handle, name string, flag int, perm uint32) (_ syscall
 }
 
 // ntCreateFileError maps error returns from NTCreateFile to user-visible errors.
-func ntCreateFileError(err error, flag int) error {
+func ntCreateFileError(err error, flag uint64) error {
 	s, ok := err.(NTStatus)
 	if !ok {
 		// Shouldn't really be possible, NtCreateFile always returns NTStatus.
@@ -166,4 +184,73 @@ func Mkdirat(dirfd syscall.Handle, name string, mode uint32) error {
 	}
 	syscall.CloseHandle(h)
 	return nil
+}
+
+func Deleteat(dirfd syscall.Handle, name string) error {
+	objAttrs := &OBJECT_ATTRIBUTES{}
+	if err := objAttrs.init(dirfd, name); err != nil {
+		return err
+	}
+	var h syscall.Handle
+	err := NtOpenFile(
+		&h,
+		DELETE,
+		objAttrs,
+		&IO_STATUS_BLOCK{},
+		FILE_SHARE_DELETE|FILE_SHARE_READ|FILE_SHARE_WRITE,
+		FILE_OPEN_REPARSE_POINT|FILE_OPEN_FOR_BACKUP_INTENT,
+	)
+	if err != nil {
+		return ntCreateFileError(err, 0)
+	}
+	defer syscall.CloseHandle(h)
+
+	const (
+		FileDispositionInformation   = 13
+		FileDispositionInformationEx = 64
+	)
+
+	// First, attempt to delete the file using POSIX semantics
+	// (which permit a file to be deleted while it is still open).
+	// This matches the behavior of DeleteFileW.
+	err = NtSetInformationFile(
+		h,
+		&IO_STATUS_BLOCK{},
+		uintptr(unsafe.Pointer(&FILE_DISPOSITION_INFORMATION_EX{
+			Flags: FILE_DISPOSITION_DELETE |
+				FILE_DISPOSITION_FORCE_IMAGE_SECTION_CHECK |
+				FILE_DISPOSITION_POSIX_SEMANTICS |
+				// This differs from DeleteFileW, but matches os.Remove's
+				// behavior on Unix platforms of permitting deletion of
+				// read-only files.
+				FILE_DISPOSITION_IGNORE_READONLY_ATTRIBUTE,
+		})),
+		uint32(unsafe.Sizeof(FILE_DISPOSITION_INFORMATION_EX{})),
+		FileDispositionInformationEx,
+	)
+	switch err {
+	case nil:
+		return nil
+	case STATUS_CANNOT_DELETE, STATUS_DIRECTORY_NOT_EMPTY:
+		return err.(NTStatus).Errno()
+	}
+
+	// If the prior deletion failed, the filesystem either doesn't support
+	// POSIX semantics (for example, FAT), or hasn't implemented
+	// FILE_DISPOSITION_INFORMATION_EX.
+	//
+	// Try again.
+	err = NtSetInformationFile(
+		h,
+		&IO_STATUS_BLOCK{},
+		uintptr(unsafe.Pointer(&FILE_DISPOSITION_INFORMATION{
+			DeleteFile: true,
+		})),
+		uint32(unsafe.Sizeof(FILE_DISPOSITION_INFORMATION{})),
+		FileDispositionInformation,
+	)
+	if st, ok := err.(NTStatus); ok {
+		return st.Errno()
+	}
+	return err
 }

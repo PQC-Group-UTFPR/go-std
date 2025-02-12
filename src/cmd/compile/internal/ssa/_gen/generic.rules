@@ -353,6 +353,10 @@
   (Add64 (Const64 <t> [c*d]) (Mul64 <t> (Const64 <t> [c]) x))
 (Mul32 (Const32 <t> [c]) (Add32 <t> (Const32 <t> [d]) x)) =>
   (Add32 (Const32 <t> [c*d]) (Mul32 <t> (Const32 <t> [c]) x))
+(Mul16 (Const16 <t> [c]) (Add16 <t> (Const16 <t> [d]) x)) =>
+  (Add16 (Const16 <t> [c*d]) (Mul16 <t> (Const16 <t> [c]) x))
+(Mul8 (Const8 <t> [c]) (Add8 <t> (Const8 <t> [d]) x)) =>
+  (Add8 (Const8 <t> [c*d]) (Mul8 <t> (Const8 <t> [c]) x))
 
 // Rewrite x*y ± x*z  to  x*(y±z)
 (Add(64|32|16|8) <t> (Mul(64|32|16|8) x y) (Mul(64|32|16|8) x z))
@@ -503,6 +507,16 @@
 (Rsh32x64 (Lsh32x64 x (Const64 [16])) (Const64 [16])) => (SignExt16to32 (Trunc32to16 <typ.Int16> x))
 (Rsh64x64 (Lsh64x64 x (Const64 [48])) (Const64 [48])) => (SignExt16to64 (Trunc64to16 <typ.Int16> x))
 (Rsh64x64 (Lsh64x64 x (Const64 [32])) (Const64 [32])) => (SignExt32to64 (Trunc64to32 <typ.Int32> x))
+
+// ((x >> c) & d) << e
+(Lsh64x64 (And64 (Rsh(64|64U)x64 <t> x (Const64 <t2> [c])) (Const64 [d])) (Const64 [e])) && c >= e => (And64 (Rsh(64|64U)x64 <t> x (Const64 <t2> [c-e])) (Const64 <t> [d<<e]))
+(Lsh32x64 (And32 (Rsh(32|32U)x64 <t> x (Const64 <t2> [c])) (Const32 [d])) (Const64 [e])) && c >= e => (And32 (Rsh(32|32U)x64 <t> x (Const64 <t2> [c-e])) (Const32 <t> [d<<e]))
+(Lsh16x64 (And16 (Rsh(16|16U)x64 <t> x (Const64 <t2> [c])) (Const16 [d])) (Const64 [e])) && c >= e => (And16 (Rsh(16|16U)x64 <t> x (Const64 <t2> [c-e])) (Const16 <t> [d<<e]))
+(Lsh8x64  (And8  (Rsh(8|8U)x64   <t> x (Const64 <t2> [c])) (Const8  [d])) (Const64 [e])) && c >= e => (And8  (Rsh(8|8U)x64   <t> x (Const64 <t2> [c-e])) (Const8  <t> [d<<e]))
+(Lsh64x64 (And64 (Rsh(64|64U)x64 <t> x (Const64 <t2> [c])) (Const64 [d])) (Const64 [e])) && c < e =>  (And64 (Lsh64x64 <t> x (Const64 <t2> [e-c])) (Const64 <t> [d<<e]))
+(Lsh32x64 (And32 (Rsh(32|32U)x64 <t> x (Const64 <t2> [c])) (Const32 [d])) (Const64 [e])) && c < e =>  (And32 (Lsh32x64 <t> x (Const64 <t2> [e-c])) (Const32 <t> [d<<e]))
+(Lsh16x64 (And16 (Rsh(16|16U)x64 <t> x (Const64 <t2> [c])) (Const16 [d])) (Const64 [e])) && c < e =>  (And16 (Lsh16x64 <t> x (Const64 <t2> [e-c])) (Const16 <t> [d<<e]))
+(Lsh8x64  (And8  (Rsh(8|8U)x64   <t> x (Const64 <t2> [c])) (Const8  [d])) (Const64 [e])) && c < e =>  (And8  (Lsh8x64  <t> x (Const64 <t2> [e-c])) (Const8  <t> [d<<e]))
 
 // constant comparisons
 (Eq(64|32|16|8)   (Const(64|32|16|8) [c]) (Const(64|32|16|8) [d])) => (ConstBool [c == d])
@@ -978,6 +992,9 @@
 // Get rid of Convert ops for pointer arithmetic on unsafe.Pointer.
 (Convert (Add(64|32) (Convert ptr mem) off) mem) => (AddPtr ptr off)
 (Convert (Convert ptr mem) mem) => ptr
+// Note: it is important that the target rewrite is ptr+(off1+off2), not (ptr+off1)+off2.
+// We must ensure that no intermediate computations are invalid pointers.
+(Convert a:(Add(64|32) (Add(64|32) (Convert ptr mem) off1) off2) mem) => (AddPtr ptr (Add(64|32) <a.Type> off1 off2))
 
 // strength reduction of divide by a constant.
 // See ../magic.go for a detailed description of these algorithms.
@@ -2055,6 +2072,15 @@
 (NilCheck          ptr:(Addr {_} (SB))    _) => ptr
 (NilCheck ptr:(Convert (Addr {_} (SB)) _) _) => ptr
 
+// Addresses of locals are always non-nil.
+(NilCheck ptr:(LocalAddr _ _) _)
+	&& warnRule(fe.Debug_checknil(), v, "removed nil check")
+	=> ptr
+
+// Nil checks of nil checks are redundant.
+// See comment at the end of https://go-review.googlesource.com/c/go/+/537775.
+(NilCheck ptr:(NilCheck _ _) _ ) => ptr
+
 // for late-expanded calls, recognize memequal applied to a single constant byte
 // Support is limited by 1, 2, 4, 8 byte sizes
 (StaticLECall {callAux} sptr (Addr {scon} (SB)) (Const64 [1]) mem)
@@ -2753,3 +2779,19 @@
 // If we don't use the result of cmpstring, might as well not call it.
 // Note that this could pretty easily generalize to any pure function.
 (SelectN [1] c:(StaticLECall {f} _ _ mem)) && c.Uses == 1 && isSameCall(f, "runtime.cmpstring") && clobber(c) => mem
+
+// We can easily compute the result of efaceeq if
+// we know the underlying type is pointer-ish.
+(StaticLECall {f} typ_ x y mem)
+	&& isSameCall(f, "runtime.efaceeq")
+	&& isDirectType(typ_)
+	&& clobber(v)
+	=> (MakeResult (EqPtr x y) mem)
+
+// We can easily compute the result of ifaceeq if
+// we know the underlying type is pointer-ish.
+(StaticLECall {f} itab x y mem)
+	&& isSameCall(f, "runtime.ifaceeq")
+	&& isDirectIface(itab)
+	&& clobber(v)
+	=> (MakeResult (EqPtr x y) mem)

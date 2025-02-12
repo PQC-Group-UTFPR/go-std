@@ -45,6 +45,8 @@ func TestIntendedInlining(t *testing.T) {
 			"funcspdelta",
 			"getm",
 			"getMCache",
+			"heapSetTypeNoHeader",
+			"heapSetTypeSmallHeader",
 			"isDirectIface",
 			"itabHashFunc",
 			"nextslicecap",
@@ -373,10 +375,6 @@ func TestIssue56044(t *testing.T) {
 	if testing.Short() {
 		t.Skipf("skipping test: too long for short mode")
 	}
-	if !goexperiment.CoverageRedesign {
-		t.Skipf("skipping new coverage tests (experiment not enabled)")
-	}
-
 	testenv.MustHaveGoBuild(t)
 
 	modes := []string{"-covermode=set", "-covermode=atomic"}

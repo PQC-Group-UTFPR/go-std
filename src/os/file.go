@@ -374,6 +374,7 @@ func Open(name string) (*File, error) {
 // it is truncated. If the file does not exist, it is created with mode 0o666
 // (before umask). If successful, methods on the returned File can
 // be used for I/O; the associated file descriptor has mode O_RDWR.
+// The directory containing the file must already exist.
 // If there is an error, it will be of type *PathError.
 func Create(name string) (*File, error) {
 	return OpenFile(name, O_RDWR|O_CREATE|O_TRUNC, 0666)
@@ -382,7 +383,8 @@ func Create(name string) (*File, error) {
 // OpenFile is the generalized open call; most users will use Open
 // or Create instead. It opens the named file with specified flag
 // (O_RDONLY etc.). If the file does not exist, and the O_CREATE flag
-// is passed, it is created with mode perm (before umask). If successful,
+// is passed, it is created with mode perm (before umask);
+// the containing directory must exist. If successful,
 // methods on the returned File can be used for I/O.
 // If there is an error, it will be of type *PathError.
 func OpenFile(name string, flag int, perm FileMode) (*File, error) {
@@ -395,6 +397,8 @@ func OpenFile(name string, flag int, perm FileMode) (*File, error) {
 
 	return f, nil
 }
+
+var errPathEscapes = errors.New("path escapes from parent")
 
 // openDir opens a file which is assumed to be a directory. As such, it skips
 // the syscalls that make the file descriptor non-blocking as these take time
@@ -692,13 +696,20 @@ func (f *File) SyscallConn() (syscall.RawConn, error) {
 // a general substitute for a chroot-style security mechanism when the directory tree
 // contains arbitrary content.
 //
+// Use [Root.FS] to obtain a fs.FS that prevents escapes from the tree via symbolic links.
+//
 // The directory dir must not be "".
 //
-// The result implements [io/fs.StatFS], [io/fs.ReadFileFS] and
-// [io/fs.ReadDirFS].
+// The result implements [io/fs.StatFS], [io/fs.ReadFileFS], [io/fs.ReadDirFS], and
+// [io/fs.ReadLinkFS].
 func DirFS(dir string) fs.FS {
 	return dirFS(dir)
 }
+
+var _ fs.StatFS = dirFS("")
+var _ fs.ReadFileFS = dirFS("")
+var _ fs.ReadDirFS = dirFS("")
+var _ fs.ReadLinkFS = dirFS("")
 
 type dirFS string
 
@@ -771,6 +782,28 @@ func (dir dirFS) Stat(name string) (fs.FileInfo, error) {
 	return f, nil
 }
 
+func (dir dirFS) Lstat(name string) (fs.FileInfo, error) {
+	fullname, err := dir.join(name)
+	if err != nil {
+		return nil, &PathError{Op: "lstat", Path: name, Err: err}
+	}
+	f, err := Lstat(fullname)
+	if err != nil {
+		// See comment in dirFS.Open.
+		err.(*PathError).Path = name
+		return nil, err
+	}
+	return f, nil
+}
+
+func (dir dirFS) ReadLink(name string) (string, error) {
+	fullname, err := dir.join(name)
+	if err != nil {
+		return "", &PathError{Op: "readlink", Path: name, Err: err}
+	}
+	return Readlink(fullname)
+}
+
 // join returns the path for name in dir.
 func (dir dirFS) join(name string) (string, error) {
 	if dir == "" {
@@ -796,7 +829,10 @@ func ReadFile(name string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return readFileContents(f)
+}
 
+func readFileContents(f *File) ([]byte, error) {
 	var size int
 	if info, err := f.Stat(); err == nil {
 		size64 := info.Size()
