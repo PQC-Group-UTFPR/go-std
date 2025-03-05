@@ -80,6 +80,7 @@
 
 // bit length
 (BitLen32 <t> x) => (RSBconst [32] (CLZ <t> x))
+(BitLen(16|8) x) => (BitLen32 (ZeroExt(16|8)to32 x))
 
 // byte swap for ARMv5
 // let (a, b, c, d) be the bytes of x from high to low
@@ -1473,3 +1474,5 @@
 (MOVBUload [off] {sym} (SB) _) && symIsRO(sym) => (MOVWconst [int32(read8(sym, int64(off)))])
 (MOVHUload [off] {sym} (SB) _) && symIsRO(sym) => (MOVWconst [int32(read16(sym, int64(off), config.ctxt.Arch.ByteOrder))])
 (MOVWload [off] {sym} (SB) _) && symIsRO(sym) => (MOVWconst [int32(read32(sym, int64(off), config.ctxt.Arch.ByteOrder))])
+(MOVBload [off] {sym} (SB) _) && symIsRO(sym) => (MOVWconst [int32(int8(read8(sym, int64(off))))])
+(MOVHload [off] {sym} (SB) _) && symIsRO(sym) => (MOVWconst [int32(int16(read16(sym, int64(off), config.ctxt.Arch.ByteOrder)))])

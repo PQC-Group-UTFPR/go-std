@@ -327,15 +327,73 @@ const (
 	C_XREG
 	C_ARNG // Vn.<T>
 	C_ELEM // Vn.<T>[index]
+
 	C_ZCON
-	C_SCON // 12 bit signed
-	C_UCON // 32 bit signed, low 12 bits 0
-	C_ADD0CON
-	C_AND0CON
-	C_ADDCON  // -0x800 <= v < 0
-	C_ANDCON  // 0 < v <= 0xFFF
-	C_LCON    // other 32
-	C_DCON    // other 64 (could subdivide further)
+	C_U1CON      // 1 bit unsigned constant
+	C_U2CON      // 2 bit unsigned constant
+	C_U3CON      // 3 bit unsigned constant
+	C_U4CON      // 4 bit unsigned constant
+	C_U5CON      // 5 bit unsigned constant
+	C_U6CON      // 6 bit unsigned constant
+	C_U7CON      // 7 bit unsigned constant
+	C_U8CON      // 8 bit unsigned constant
+	C_S5CON      // 5 bit signed constant
+	C_US12CON    // same as C_S12CON, increase the priority of C_S12CON in special cases.
+	C_UU12CON    // same as C_U12CON, increase the priority of C_U12CON in special cases.
+	C_S12CON     // 12 bit signed constant, -0x800 < v <= 0x7ff
+	C_U12CON     // 12 bit unsigned constant, 0 < v <= 0xfff
+	C_12CON      // 12 bit signed constant, or 12 bit unsigned constant
+	C_S13CON20_0 // 13 bit signed constant, low 12 bits 0
+	C_S13CON     // 13 bit signed constant
+	C_U13CON20_0 // 13 bit unsigned constant, low 12 bits 0
+	C_U13CON     // 13 bit unsigned constant
+	C_13CON      // 13 bit signed constant, or 13 bit unsigned constant
+	C_U15CON     // 15 bit unsigned constant
+	C_U15CON20_0 // 15 bit unsigned constant, low 12 bits 0
+	C_32CON20_0  // 32 bit signed, low 12 bits 0
+	C_32CON      // other 32 bit signed
+
+	// 64 bit signed, lo32 bits 0, hi20 bits are not 0, hi12 bits can
+	// be obtained by sign extension of the hi20 bits.
+	C_DCON20S_0
+	// 64 bit signed, lo52 bits 0, hi12 bits are not 0.
+	C_DCON12_0
+	// 64 bit signed, lo32 bits 0, hi32 bits are not 0.
+	C_DCON32_0
+	// 64 bit signed, lo12 bits 0, lo20 bits are not 0, hi20 bits can be
+	// obtained by sign extension of the lo20 bits, other bits are not 0.
+	C_DCON12_20S
+	// 64 bit signed, lo12 bits 0, hi20 bits are not 0, hi12 bits can be
+	// obtained by sign extension of the hi20 bits, other bits are not 0.
+	C_DCON20S_20
+	// 64 bit signed, lo12 bits 0, other bits are not 0.
+	C_DCON32_20
+	// 64 bit signed, lo12 bits are not 0, 12~51 bits can be obtained
+	// by sign extension of the lo12 bits, other bits are not 0.
+	C_DCON12_12S
+	// 64 bit signed, hi20 bits and lo12 bits are not 0, hi12 bits can
+	// be obtained by sign extension of the hi20 bits, lo20 bits can
+	// be obtained by sign extension of the lo12 bits.
+	C_DCON20S_12S
+	// 64 bit signed, lo12 bits are not 0, lo20 bits can be obtained by sign
+	// extension of the lo12 bits, other bits are not 0.
+	C_DCON32_12S
+	// 64 bit signed, lo20 and lo12 bits are not 0, hi20 bits can be obtained by sign
+	// extension of the lo20 bits. other bits are not 0.
+	C_DCON12_32S
+	// 64 bit signed, hi20 bits are not 0, hi12 bits can be obtained by sign
+	// extension of the hi20 bits, lo32 bits are not 0.
+	C_DCON20S_32
+	// 64 bit signed, 12~51 bits 0, other bits are not 0.
+	C_DCON12_12U
+	// 64 bit signed, lo20 bits 0, hi20 bits are not 0, hi12 bits can be
+	// obtained by sign extension of the hi20 bits, lo12 bits are not 0.
+	C_DCON20S_12U
+	// 64 bit signed, lo20 bits 0, other bits are not 0.
+	C_DCON32_12U
+	// other 64
+	C_DCON
+
 	C_SACON   // $n(REG) where n <= int12
 	C_LACON   // $n(REG) where int12 < n <= int32
 	C_DACON   // $n(REG) where int32 < n
@@ -637,6 +695,12 @@ const (
 	AFMAXF
 	AFMAXD
 
+	// 3.2.1.4
+	AFMAXAF
+	AFMAXAD
+	AFMINAF
+	AFMINAD
+
 	// 3.2.1.7
 	AFCOPYSGF
 	AFCOPYSGD
@@ -700,6 +764,40 @@ const (
 	AXVSEQW
 	AVSEQV
 	AXVSEQV
+
+	// LSX and LASX shift operation instructions
+	AVSLLB
+	AVSLLH
+	AVSLLW
+	AVSLLV
+	AVSRLB
+	AVSRLH
+	AVSRLW
+	AVSRLV
+	AVSRAB
+	AVSRAH
+	AVSRAW
+	AVSRAV
+	AVROTRB
+	AVROTRH
+	AVROTRW
+	AVROTRV
+	AXVSLLB
+	AXVSLLH
+	AXVSLLW
+	AXVSLLV
+	AXVSRLB
+	AXVSRLH
+	AXVSRLW
+	AXVSRLV
+	AXVSRAB
+	AXVSRAH
+	AXVSRAW
+	AXVSRAV
+	AXVROTRB
+	AXVROTRH
+	AXVROTRW
+	AXVROTRV
 
 	ALAST
 

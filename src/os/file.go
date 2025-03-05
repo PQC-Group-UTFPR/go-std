@@ -51,6 +51,7 @@ import (
 	"io"
 	"io/fs"
 	"runtime"
+	"slices"
 	"syscall"
 	"time"
 	"unsafe"
@@ -685,6 +686,23 @@ func (f *File) SyscallConn() (syscall.RawConn, error) {
 	return newRawConn(f)
 }
 
+// Fd returns the system file descriptor or handle referencing the open file.
+// If f is closed, the descriptor becomes invalid.
+// If f is garbage collected, a cleanup may close the descriptor,
+// making it invalid; see [runtime.AddCleanup] for more information on when
+// a cleanup might be run.
+//
+// Do not close the returned descriptor; that could cause a later
+// close of f to close an unrelated descriptor.
+//
+// On Unix systems this will cause the [File.SetDeadline]
+// methods to stop working.
+//
+// For most uses prefer the f.SyscallConn method.
+func (f *File) Fd() uintptr {
+	return f.fd()
+}
+
 // DirFS returns a file system (an fs.FS) for the tree of files rooted at the directory dir.
 //
 // Note that DirFS("/prefix") only guarantees that the Open calls it makes to the
@@ -829,30 +847,45 @@ func ReadFile(name string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	return readFileContents(f)
+
+	return readFileContents(statOrZero(f), f.Read)
 }
 
-func readFileContents(f *File) ([]byte, error) {
+func statOrZero(f *File) int64 {
+	if fi, err := f.Stat(); err == nil {
+		return fi.Size()
+	}
+	return 0
+}
+
+// readFileContents reads the contents of a file using the provided read function
+// (*os.File.Read, except in tests) one or more times, until an error is seen.
+//
+// The provided size is the stat size of the file, which might be 0 for a
+// /proc-like file that doesn't report a size.
+func readFileContents(statSize int64, read func([]byte) (int, error)) ([]byte, error) {
+	zeroSize := statSize == 0
+
+	// Figure out how big to make the initial slice. For files with known size
+	// that fit in memory, use that size + 1. Otherwise, use a small buffer and
+	// we'll grow.
 	var size int
-	if info, err := f.Stat(); err == nil {
-		size64 := info.Size()
-		if int64(int(size64)) == size64 {
-			size = int(size64)
-		}
+	if int64(int(statSize)) == statSize {
+		size = int(statSize)
 	}
 	size++ // one byte for final read at EOF
 
-	// If a file claims a small size, read at least 512 bytes.
-	// In particular, files in Linux's /proc claim size 0 but
-	// then do not work right if read in small pieces,
-	// so an initial read of 1 byte would not work correctly.
-	if size < 512 {
-		size = 512
+	const minBuf = 512
+	// If a file claims a small size, read at least 512 bytes. In particular,
+	// files in Linux's /proc claim size 0 but then do not work right if read in
+	// small pieces, so an initial read of 1 byte would not work correctly.
+	if size < minBuf {
+		size = minBuf
 	}
 
 	data := make([]byte, 0, size)
 	for {
-		n, err := f.Read(data[len(data):cap(data)])
+		n, err := read(data[len(data):cap(data)])
 		data = data[:len(data)+n]
 		if err != nil {
 			if err == io.EOF {
@@ -861,9 +894,12 @@ func readFileContents(f *File) ([]byte, error) {
 			return data, err
 		}
 
-		if len(data) >= cap(data) {
-			d := append(data[:cap(data)], 0)
-			data = d[:len(data)]
+		// If we're either out of capacity or if the file was a /proc-like zero
+		// sized file, grow the buffer. Per Issue 72080, we always want to issue
+		// Read calls on zero-length files with a non-tiny buffer size.
+		capRemain := cap(data) - len(data)
+		if capRemain == 0 || (zeroSize && capRemain < minBuf) {
+			data = slices.Grow(data, minBuf)
 		}
 	}
 }

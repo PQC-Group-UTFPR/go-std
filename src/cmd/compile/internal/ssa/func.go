@@ -46,6 +46,7 @@ type Func struct {
 	NoSplit     bool  // true if function is marked as nosplit.  Used by schedule check pass.
 	dumpFileSeq uint8 // the sequence numbers of dump file. (%s_%02d__%s.dump", funcname, dumpFileSeq, phaseName)
 	IsPgoHot    bool
+	DeferReturn *Block // avoid creating more than one deferreturn if there's multiple calls to deferproc-etc.
 
 	// when register allocation is done, maps value ids to locations
 	RegAlloc []Location

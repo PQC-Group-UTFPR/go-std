@@ -4399,7 +4399,6 @@ func save(pc, sp, bp uintptr) {
 	gp.sched.pc = pc
 	gp.sched.sp = sp
 	gp.sched.lr = 0
-	gp.sched.ret = 0
 	gp.sched.bp = bp
 	// We need to ensure ctxt is zero, but can't have a write
 	// barrier here. However, it should always already be zero.
@@ -6391,11 +6390,11 @@ func schedtrace(detailed bool) {
 	// Even if we hold schedlock, most data can be changed concurrently.
 	// E.g. (p->m ? p->m->id : -1) can crash if p->m changes from non-nil to nil.
 	for i, pp := range allp {
-		mp := pp.m.ptr()
 		h := atomic.Load(&pp.runqhead)
 		t := atomic.Load(&pp.runqtail)
 		if detailed {
 			print("  P", i, ": status=", pp.status, " schedtick=", pp.schedtick, " syscalltick=", pp.syscalltick, " m=")
+			mp := pp.m.ptr()
 			if mp != nil {
 				print(mp.id)
 			} else {
@@ -6404,16 +6403,26 @@ func schedtrace(detailed bool) {
 			print(" runqsize=", t-h, " gfreecnt=", pp.gFree.n, " timerslen=", len(pp.timers.heap), "\n")
 		} else {
 			// In non-detailed mode format lengths of per-P run queues as:
-			// [len1 len2 len3 len4]
+			// [ len1 len2 len3 len4 ]
 			print(" ")
 			if i == 0 {
-				print("[")
+				print("[ ")
 			}
 			print(t - h)
 			if i == len(allp)-1 {
-				print("]\n")
+				print(" ]")
 			}
 		}
+	}
+
+	if !detailed {
+		// Format per-P schedticks as: schedticks=[ tick1 tick2 tick3 tick4 ].
+		print(" schedticks=[ ")
+		for _, pp := range allp {
+			print(pp.schedtick)
+			print(" ")
+		}
+		print("]\n")
 	}
 
 	if !detailed {

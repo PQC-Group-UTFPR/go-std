@@ -19,7 +19,9 @@ The second is the SWIG program, which is a general tool for
 interfacing between languages. For information on SWIG see
 https://swig.org/. When running go build, any file with a .swig
 extension will be passed to SWIG. Any file with a .swigcxx extension
-will be passed to SWIG with the -c++ option.
+will be passed to SWIG with the -c++ option. A package can't be just
+a .swig or .swigcxx file; there must be at least one .go file, even if
+it has just a package clause.
 
 When either cgo or SWIG is used, go build will pass any .c, .m, .s, .S
 or .sx files to the C compiler, and any .cc, .cpp, .cxx files to the C++
@@ -214,12 +216,12 @@ For example,
 	import "example.org/user/foo.hg"
 
 denotes the root directory of the Mercurial repository at
-example.org/user/foo or foo.hg, and
+example.org/user/foo, and
 
 	import "example.org/repo.git/foo/bar"
 
 denotes the foo/bar directory of the Git repository at
-example.org/repo or repo.git.
+example.org/repo.
 
 When a version control system supports multiple protocols,
 each is tried in turn when downloading. For example, a Git

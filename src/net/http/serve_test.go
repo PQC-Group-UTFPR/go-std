@@ -7128,10 +7128,6 @@ func testHeadBody(t *testing.T, mode testMode, chunked bool, method string) {
 // or disabled when the header is set to nil.
 func TestDisableContentLength(t *testing.T) { run(t, testDisableContentLength) }
 func testDisableContentLength(t *testing.T, mode testMode) {
-	if mode == http2Mode {
-		t.Skip("skipping until h2_bundle.go is updated; see https://go-review.googlesource.com/c/net/+/471535")
-	}
-
 	noCL := newClientServerTest(t, mode, HandlerFunc(func(w ResponseWriter, r *Request) {
 		w.Header()["Content-Length"] = nil // disable the default Content-Length response
 		fmt.Fprintf(w, "OK")
@@ -7289,4 +7285,53 @@ func testServerReadAfterHandlerAbort100Continue(t *testing.T, mode testMode) {
 	}
 	readyc <- struct{}{} // server starts reading from the request body
 	readyc <- struct{}{} // server finishes reading from the request body
+}
+
+func TestInvalidChunkedBodies(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		b    string
+	}{{
+		name: "bare LF in chunk size",
+		b:    "1\na\r\n0\r\n\r\n",
+	}, {
+		name: "bare LF at body end",
+		b:    "1\r\na\r\n0\r\n\n",
+	}} {
+		t.Run(test.name, func(t *testing.T) {
+			reqc := make(chan error)
+			ts := newClientServerTest(t, http1Mode, HandlerFunc(func(w ResponseWriter, r *Request) {
+				got, err := io.ReadAll(r.Body)
+				if err == nil {
+					t.Logf("read body: %q", got)
+				}
+				reqc <- err
+			})).ts
+
+			serverURL, err := url.Parse(ts.URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			conn, err := net.Dial("tcp", serverURL.Host)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := conn.Write([]byte(
+				"POST / HTTP/1.1\r\n" +
+					"Host: localhost\r\n" +
+					"Transfer-Encoding: chunked\r\n" +
+					"Connection: close\r\n" +
+					"\r\n" +
+					test.b)); err != nil {
+				t.Fatal(err)
+			}
+			conn.(*net.TCPConn).CloseWrite()
+
+			if err := <-reqc; err == nil {
+				t.Errorf("server handler: io.ReadAll(r.Body) succeeded, want error")
+			}
+		})
+	}
 }

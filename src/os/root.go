@@ -76,6 +76,7 @@ const (
 )
 
 // OpenRoot opens the named directory.
+// It follows symbolic links in the directory name.
 // If there is an error, it will be of type *PathError.
 func OpenRoot(name string) (*Root, error) {
 	testlog.Open(name)
@@ -149,6 +150,12 @@ func (r *Root) Mkdir(name string, perm FileMode) error {
 		return &PathError{Op: "mkdirat", Path: name, Err: errors.New("unsupported file mode")}
 	}
 	return rootMkdir(r, name, perm)
+}
+
+// Chown changes the numeric uid and gid of the named file in the root.
+// See [Chown] for more details.
+func (r *Root) Chown(name string, uid, gid int) error {
+	return rootChown(r, name, uid, gid)
 }
 
 // Remove removes the named file or (empty) directory in the root.
@@ -305,7 +312,7 @@ func (rfs *rootFS) ReadFile(name string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	return readFileContents(f)
+	return readFileContents(statOrZero(f), f.Read)
 }
 
 func (rfs *rootFS) Stat(name string) (FileInfo, error) {

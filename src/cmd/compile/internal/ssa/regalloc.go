@@ -930,6 +930,7 @@ func (s *regAllocState) regalloc(f *Func) {
 
 	// Data structure used for computing desired registers.
 	var desired desiredState
+	desiredSecondReg := map[ID][4]register{} // desired register allocation for 2nd part of a tuple
 
 	// Desired registers for inputs & outputs for each instruction in the block.
 	type dentry struct {
@@ -949,6 +950,7 @@ func (s *regAllocState) regalloc(f *Func) {
 		s.curBlock = b
 		s.startRegsMask = 0
 		s.usedSinceBlockStart = 0
+		clear(desiredSecondReg)
 
 		// Initialize regValLiveSet and uses fields for this block.
 		// Walk backwards through the block doing liveness analysis.
@@ -1346,6 +1348,11 @@ func (s *regAllocState) regalloc(f *Func) {
 				}
 				dinfo[i].in[j] = desired.get(a.ID)
 			}
+			if v.Op == OpSelect1 && prefs[0] != noRegister {
+				// Save desired registers of select1 for
+				// use by the tuple generating instruction.
+				desiredSecondReg[v.Args[0].ID] = prefs
+			}
 		}
 
 		// Process all the non-phi values.
@@ -1670,6 +1677,7 @@ func (s *regAllocState) regalloc(f *Func) {
 				}
 				tmpReg = s.allocReg(m, &tmpVal)
 				s.nospill |= regMask(1) << tmpReg
+				s.tmpused |= regMask(1) << tmpReg
 			}
 
 			// Now that all args are in regs, we're ready to issue the value itself.
@@ -1745,6 +1753,17 @@ func (s *regAllocState) regalloc(f *Func) {
 								// Desired register is allowed and unused.
 								mask = regMask(1) << r
 								break
+							}
+						}
+					}
+					if out.idx == 1 {
+						if prefs, ok := desiredSecondReg[v.ID]; ok {
+							for _, r := range prefs {
+								if r != noRegister && (mask&^s.used)>>r&1 != 0 {
+									// Desired register is allowed and unused.
+									mask = regMask(1) << r
+									break
+								}
 							}
 						}
 					}
@@ -2874,7 +2893,8 @@ type desiredStateEntry struct {
 	// Registers it would like to be in, in priority order.
 	// Unused slots are filled with noRegister.
 	// For opcodes that return tuples, we track desired registers only
-	// for the first element of the tuple.
+	// for the first element of the tuple (see desiredSecondReg for
+	// tracking the desired register for second part of a tuple).
 	regs [4]register
 }
 
